@@ -1,0 +1,153 @@
+---
+title: "Segregation Classification"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyr)
+library(plyr);library(dplyr, warn.conflicts = F)
+library(tictoc)
+library(e1071)
+rm(list=ls())
+s = function(x){summary(factor(x))}
+```
+
+## Segregation Classification
+
+For more my homepage see <http://jeremyspater.com>.
+
+We would like a method for classifying neighborhoods as **segregated** or not. This is a problem with many real-world applications in social science.
+
+We will do this by generating simulated neighborhoods and using them to test classifiers.
+
+We start by initializing some global parameters for the simulation:
+
+```{r Initialize parameters}
+#Set global parameters
+xlim = 100 #neighborhood size in longitude dimension [meters]. 
+ylim = 100 #neighborhood size in latitude dimension [meters].
+ngrid = 10 #number of grid spaces
+```
+
+## Functions to create simulated neighborhoods
+
+We will use two data-generating processes (DGP's): binary and cluster. These can both be used to create segregated or integrated (non-segregated) neighborhoods. 
+
+Neighborhoods generated using the binary DGP are split at a particular line of longitude (i.e. left vs right), without loss of generality. In segregated neighborhoods, individuals from the minority group are more likely to be found to the west (left) of the line. 
+
+In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
+
+### Binary DGP
+
+This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
+
+```{r Binary DGP, segregated}
+
+#inputs: n: number of individuals; xlim: horizontal size of neighborhood;
+#ylim: vertical size of neighborhood;
+#pminority: proportion of individuals who belong to minority group;
+#conc: concentration parameter
+create_Seg = function(n, xlim, ylim, pminority, conc){ 
+  fr = data.frame(minor = rbinom(n,1,pminority) == 1, 
+                  long = NA,
+                  lat = NA,
+                  ghe = rbinom(n,1,conc)) #assign to `their' side or not
+  
+  #lat longs for majority (ghe = F): randomly in neighborhood
+  fr$long[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F),
+                                               0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for majority (ghe = T): on majority-side
+  fr$long[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T),
+                                               min = 0, 
+                                               max = (1 - pminority)*xlim)
+  
+  fr$lat[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for minority (ghe = F): randomly in neighborhood
+  fr$long[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 
+                                               0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for minority (ghe = T): on minority-sde
+  fr$long[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T),
+                                               min = (1-pminority)*xlim, max =
+                                                 xlim) 
+  fr$lat[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T), 0,
+                                              ylim) #y: runif from 0 to ylim
+  return(fr)
+}
+```
+
+Here is a function to create an integrated (non-segregated) neighborhood using the binary DGP. Neither group is concentrated on either side of the neighborhood, so the DGP is just a uniform distribution for both groups.
+
+```{r Binary DGP, non-segregated}
+#Nonsegregated neighborhoods: just a uniform distribution
+create_Nonseg = function(n, xlim, ylim, pminority){
+  fr = data.frame(long = runif(n,0,xlim),
+                  lat = runif(n,0,xlim),
+                  minor = rbinom(n,1,pminority) == 1)
+  return(fr)
+}
+```
+
+### Cluster DGP
+
+The cluster DGP generates circular clusters of individuals within the neighborhood. For segregated neighborhoods, each cluster consists predominantly of individuals from one group, while for integrated neighborhoods, clusters are not segregated by group.
+
+Here is the function to create segregated neighborhoods according to the cluster DGP:
+
+```{r Cluster DGP, segregated}
+ClusterSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
+  kids = rPoissonCluster(kappa = ka, #using 0.05 before
+                         expand = 10,
+                         rcluster = nclust2,
+                         radius = r,#3, #tried 10, but the clusters overlap too much
+                         n = nclus, #tried 5, but it didn't look very segregated
+                         p = p,
+                         win = owin(c(0,100),c(0,100)))
+  
+  kids_df = data.frame(long = kids$x,
+                       lat = kids$y,
+                       minor = kids$marks) 
+  ns = min(nrow(kids_df), n_samp)
+  return(kids_df[sample(nrow(kids_df), ns), ]) #return sample of n rows
+}
+```
+
+Here is a function to make non-segregated neighborhoods according to the cluster DGP:
+
+```{r Cluster DGP, integrated}
+ClusterNonSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
+  kids = rPoissonCluster(kappa = ka,
+                         expand = 10,
+                         rcluster = nclust1,
+                         radius = r,#3,
+                         n = nclus,
+                         #p = p,
+                         win = owin(c(0,100),c(0,100)))
+  
+  marks(kids) = sample( c('yes', 'no'), kids$n, replace=TRUE, prob = c(p, 1-p)) #select marks; not by cluster
+  
+  kids_df = data.frame(long = kids$x,
+                       lat = kids$y,
+                       minor = kids$marks) 
+  ns = min(nrow(kids_df), n_samp)
+  return(kids_df[sample(nrow(kids_df), ns), ]) #return sample of n rows
+}
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
