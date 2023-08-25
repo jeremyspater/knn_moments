@@ -1,0 +1,587 @@
+---
+title: "Segregation Classification"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyr)
+library(plyr);library(dplyr, warn.conflicts = F)
+library(tictoc)
+library(e1071)
+library(spatstat)
+rm(list=ls())
+s = function(x){summary(factor(x))}
+```
+
+## Segregation Classification
+
+For more my homepage see <http://jeremyspater.com>.
+
+We would like a method for classifying neighborhoods as **segregated** or not. This is a problem with many real-world applications in social science.
+
+We will do this by generating simulated neighborhoods and using them to test classifiers.
+
+We start by initializing some global parameters for the simulation:
+
+```{r Initialize parameters}
+#Set global parameters
+xlim = 100 #neighborhood size in longitude dimension [meters]. 
+ylim = 100 #neighborhood size in latitude dimension [meters].
+ngrid = 10 #number of grid spaces
+```
+
+## Functions to create simulated neighborhoods
+
+We will use two data-generating processes (DGP's): binary and cluster. These can both be used to create segregated or integrated (non-segregated) neighborhoods. 
+
+Neighborhoods generated using the binary DGP are split at a particular line of longitude (i.e. left vs right), without loss of generality. In segregated neighborhoods, individuals from the minority group are more likely to be found to the west (left) of the line. 
+
+In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
+
+### Binary DGP
+
+This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
+
+```{r Binary DGP, segregated}
+
+#inputs: n: number of individuals; xlim: horizontal size of neighborhood;
+#ylim: vertical size of neighborhood;
+#pminority: proportion of individuals who belong to minority group;
+#conc: concentration parameter
+create_Seg = function(n, xlim, ylim, pminority, conc){ 
+  fr = data.frame(minor = rbinom(n,1,pminority) == 1, 
+                  long = NA,
+                  lat = NA,
+                  ghe = rbinom(n,1,conc)) #assign to `their' side or not
+  
+  #lat longs for majority (ghe = F): randomly in neighborhood
+  fr$long[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F),
+                                               0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for majority (ghe = T): on majority-side
+  fr$long[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T),
+                                               min = 0, 
+                                               max = (1 - pminority)*xlim)
+  
+  fr$lat[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for minority (ghe = F): randomly in neighborhood
+  fr$long[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 
+                                               0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0,
+                                              ylim) #y: runif from 0 to ylim
+  #lat longs for minority (ghe = T): on minority-sde
+  fr$long[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T),
+                                               min = (1-pminority)*xlim, max =
+                                                 xlim) 
+  fr$lat[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T), 0,
+                                              ylim) #y: runif from 0 to ylim
+  return(fr)
+}
+```
+
+```{r Source KNN calculation scripts}
+source('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/5-10-19_sim_knearest.R')
+
+```
+
+```{r Functions to calculate KNN moments simulations (BINARY)}
+####################################################################################################
+#Functions to calculate k-nearest mean, median, and sd for large number of simulations (BINARY)
+
+#For nonsegregated neighborhoods
+K_Nonseg_M = function(NeighSize, pminority = 0.3, k_in = 10){ #new version 4-1-20; higher moments
+  A = create_Nonseg(n = NeighSize,
+                    xlim = xlim,
+                    ylim = ylim,
+                    pminority = pminority)
+  A_prime = k_sim(A, k = k_in)
+  #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+  out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  return(out)
+}
+
+#For segregated neighborhoods
+K_Seg_M = function(NeighSize, pminority = 0.3, k_in = 10,  conc = 0.7){
+  A = create_Seg(n = NeighSize,
+                 xlim = xlim,
+                 ylim = ylim,
+                 pminority = pminority,
+                 conc = conc)
+  A_prime = k_sim(A, k = k_in)
+  #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+  out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  return(out)
+}
+####################################################################################################
+```
+
+Here is a function to create an integrated (non-segregated) neighborhood using the binary DGP. Neither group is concentrated on either side of the neighborhood, so the DGP is just a uniform distribution for both groups.
+
+```{r Binary DGP, non-segregated}
+#Nonsegregated neighborhoods: just a uniform distribution
+create_Nonseg = function(n, xlim, ylim, pminority){
+  fr = data.frame(long = runif(n,0,xlim),
+                  lat = runif(n,0,xlim),
+                  minor = rbinom(n,1,pminority) == 1)
+  return(fr)
+}
+```
+
+### Cluster DGP
+
+The cluster DGP generates circular clusters of individuals within the neighborhood. For segregated neighborhoods, each cluster consists predominantly of individuals from one group, while for integrated neighborhoods, clusters are not segregated by group.
+
+Here is the function to create segregated neighborhoods according to the cluster DGP:
+
+```{r Cluster DGP, segregated}
+
+
+
+ClusterSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
+  kids = rPoissonCluster(kappa = ka, #using 0.05 before
+                         expand = 10,
+                         rcluster = nclust2,
+                         radius = r,#3, #tried 10, but the clusters overlap too much
+                         n = nclus, #tried 5, but it didn't look very segregated
+                         p = p,
+                         win = owin(c(0,100),c(0,100)))
+  
+  kids_df = data.frame(long = kids$x,
+                       lat = kids$y,
+                       minor = kids$marks) 
+  ns = min(nrow(kids_df), n_samp)
+  return(kids_df[sample(nrow(kids_df), ns), ]) #return sample of n rows
+}
+
+#Cluster process (used for nonsegregated)
+nclust1 <- function(x0, y0, radius, n) {
+  X <- runifdisc(n, radius, centre=c(x0, y0))
+  return(X)
+}
+
+#Cluster process (used for segregated)
+#https://rdrr.io/cran/spatstat/man/rPoissonCluster.html
+# multitype Neyman-Scott process (each cluster is a multitype process) 
+#[This is same as Matern cluster process, only with marks?]
+nclust2 <- function(x0, y0, radius, n, types=c("yes", "no"), p) {
+  X <- runifdisc(n, radius, centre=c(x0, y0))
+  #M <- sample(types, n, replace=TRUE, prob = c(p, 1-p)) #this just makes the marks random
+  M <- sample(types, 1, replace=TRUE, prob = c(p, 1-p)) %>% rep(n)#this gives everybody in the cluster the same mark
+  marks(X) <- M
+  return(X)
+}
+```
+
+Here is a function to make non-segregated neighborhoods according to the cluster DGP:
+
+```{r Cluster DGP, integrated}
+ClusterNonSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
+  kids = rPoissonCluster(kappa = ka,
+                         expand = 10,
+                         rcluster = nclust1,
+                         radius = r,#3,
+                         n = nclus,
+                         #p = p,
+                         win = owin(c(0,100),c(0,100)))
+  
+  marks(kids) = sample( c('yes', 'no'), kids$n, replace=TRUE, prob = c(p, 1-p)) #select marks; not by cluster
+  
+  kids_df = data.frame(long = kids$x,
+                       lat = kids$y,
+                       minor = kids$marks) 
+  ns = min(nrow(kids_df), n_samp)
+  return(kids_df[sample(nrow(kids_df), ns), ]) #return sample of n rows
+}
+```
+
+```{r Functions to simulate neighborhoods and calculate metrics}
+########################################################################################################################
+#Functions to simulate neighborhoods and calculate metrics
+
+#K for Nonsegregated, clustered neighborhoods
+K_Nonseg_Cluster2_M = function(NeighSize = 100, pminority = 0.3, k_in = 10, nclus = 13, ka = 0.05, r = 3){ #4-1-20 new moments
+  A = ClusterNonSeg( n_samp = NeighSize, p = pminority, nclus = 13, ka = ka, r = r  )
+  if(nrow(A) == 0){ #If Cluster function didn't give any valid points, mark it NA
+    out = data.frame(KNearest_Mean = NA, KNearest_SD = NA)
+  }else{
+    A_prime = k_sim(A, k = k_in)
+    #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+    out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  }
+  return(out)
+}
+
+#K for Segregated, clustered neighborhoods
+K_Seg_Cluster2_M = function(NeighSize = 100, pminority = 0.3, k_in = 10, nclus = 13, ka = 0.05, r = 3){ #4-1-20 new moments
+  A = ClusterSeg( n_samp = NeighSize, p = pminority, nclus = 13, ka = ka, r = r )
+  if(nrow(A) == 0){ #If Cluster function didn't give any valid points, mark it NA
+    out = data.frame(KNearest_Mean = NA, KNearest_SD = NA)
+  }else{
+    A_prime = k_sim(A, k = k_in)
+    #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+    out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                     KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  }
+  return(out)
+}
+####################################################################################################
+```
+
+```{r Run segregation functions on Grid of input paramaters to Binary DGP}
+####################################################################################################
+#Grid for Binary (from 5-22-20_Sim.R). But modified to keep all stats for each sim and each grid point, not just "which metric does better"
+
+pminority_vec =  seq(0.1, 0.5, 0.1) #proportion of minorities
+conc_vec = seq(0.5, 1, 0.1) #concentration
+
+parm_exp = expand.grid(pminority_vec, conc_vec) %>% 
+  rename(p_minority = Var1,
+         conc = Var2) ; rm(pminority_vec, conc_vec) #
+
+#Run on grid
+nsim = 5 #
+n_neigh = 100 #people per neighborhood
+n_tot = nrow(parm_exp) * nsim #number of rows in results matrix: grid points * sims/point
+results_mat_nonseg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+results_mat_seg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+names(results_mat_nonseg) = c('NeighType','PMinor_Parm','Conc_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+names(results_mat_seg) = c('NeighType','PMinor_Parm','Conc_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+tic()
+for(j in 1:nrow(parm_exp)){
+  #print(j)
+  #K-nearest
+  Out_K_Nonseg = ldply(1:nsim, function(x) K_Nonseg_M(NeighSize = n_neigh,
+                                                    pminority = parm_exp$p_minority[j],
+                                                    k_in = 10 ))
+  Out_K_Seg = ldply(1:nsim, function(x) K_Seg_M(NeighSize = n_neigh,
+                                              pminority = parm_exp$p_minority[j],
+                                              k_in = 10,
+                                              conc = parm_exp$conc[j] ))
+  c1 = (j-1)*nsim + 1
+  c2 = (j)*nsim
+  results_mat_nonseg[c1:c2,1] = 'Nonseg. Binary'; results_mat_nonseg[c1:c2,2] = parm_exp[j,1]; results_mat_nonseg[c1:c2,3] = parm_exp[j,2]
+  results_mat_nonseg[c1:c2,4:8] =  Out_K_Nonseg    #Nonseg Results
+  results_mat_seg[c1:c2,1] = 'Seg. Binary'; results_mat_seg[c1:c2,2] = parm_exp[j,1]; results_mat_seg[c1:c2,3] = parm_exp[j,2]
+  results_mat_seg[c1:c2,4:8] = Out_K_Seg    #Seg results
+}
+toc() #8 sec for 10 simulations with 30 rows of parm_exp. 700 sec for 1000 simulations
+
+#quick check for nsim = 10
+#sum(results_mat_nonseg$KNearest_Mean < results_mat_seg$KNearest_Mean) #279/300. Ok, seems to be working
+
+#save results, first for n = 1000 (4-7-20)
+path1 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/',
+               'Out_Grid_Binary_Nonseg',Sys.Date(),'_',nsim,'x.RDS')
+#saveRDS(results_mat_nonseg, path1); rm(path1)
+path1 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/',
+               'Out_Grid_Binary_Seg',Sys.Date(),'_',nsim,'x.RDS')
+#saveRDS(results_mat_seg, path1); rm(path1)
+rm(pminority_vec, conc_vec, parm_exp, nsim, n_neigh, n_tot, results_mat_nonseg, results_mat_seg)
+####################################################################################################
+```
+
+```{r Run segregation functions on Grid of input paramaters to Cluster DGP}
+####################################################################################################
+#Grid for Cluster, based on above
+
+pminority_vec =  seq(0.1, 0.5, 0.1) #proportion of minorities
+r_vec = seq(10, 40, 5) #radius of clusters
+
+parm_exp = expand.grid(pminority_vec, r_vec) %>% 
+  rename(p_minority = Var1,
+         r = Var2) %>%
+  mutate(nclus = 10*r,  #people per cluster proportional to size of cluster
+         ka = 0.001 * 100 / nclus); rm(pminority_vec, r_vec) #number of clusters inversely proportional to size
+
+#Run on grid
+nsim = 5 #
+n_neigh = 100 #people per neighborhood
+n_tot = nrow(parm_exp) * nsim #number of rows in results matrix: grid points * sims/point
+results_clus_nonseg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+results_clus_seg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+names(results_clus_nonseg) = c('NeighType','PMinor_Parm','r_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+names(results_clus_seg) = c('NeighType','PMinor_Parm','r_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+tic()
+for(j in 1:nrow(parm_exp)){
+  #print(j)
+  #K-nearest
+  Out_K_Nonseg = ldply(1:nsim, function(x) K_Nonseg_Cluster2_M(k_in = 10,
+                                                               NeighSize = n_neigh,
+                                                               pminority = parm_exp$p_minority[j],
+                                                               nclus = parm_exp$nclus[j],
+                                                               ka = parm_exp$ka[j],
+                                                               r = parm_exp$r[j] ))
+  Out_K_Seg = ldply(1:nsim, function(x) K_Seg_Cluster2_M(k_in = 10,
+                                                            NeighSize = n_neigh,
+                                                            pminority = parm_exp$p_minority[j],
+                                                            nclus = parm_exp$nclus[j],
+                                                            ka = parm_exp$ka[j],
+                                                            r = parm_exp$r[j] ))
+  c1 = (j-1)*nsim + 1
+  c2 = (j)*nsim
+  results_clus_nonseg[c1:c2,1] = 'Nonseg. Cluster'; results_clus_nonseg[c1:c2,2] = parm_exp[j,1]; results_clus_nonseg[c1:c2,3] = parm_exp[j,2]
+  results_clus_nonseg[c1:c2,4:8] =  Out_K_Nonseg    #Nonseg Results
+  results_clus_seg[c1:c2,1] = 'Seg. Cluster'; results_clus_seg[c1:c2,2] = parm_exp[j,1]; results_clus_seg[c1:c2,3] = parm_exp[j,2]
+  results_clus_seg[c1:c2,4:8] = Out_K_Seg    #Seg results
+}
+toc() #1.7 sec for nsim = 1; 
+
+#quick check for nsim = 10
+sum(results_clus_nonseg$KNearest_Mean <= results_clus_seg$KNearest_Mean, na.rm = T) #29/35 w/ 4 NA's.
+
+#CHECK WHAT'S GOING ON WITH NA'S . . . ! These are for big p-minority, big r. Why getting NA's here . . .??
+
+#save results, first for n = 1000 (4-7-20)
+path1 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/',
+               'Out_Grid_Cluster_Nonseg',Sys.Date(),'_',nsim,'x.RDS')
+#saveRDS(results_clus_nonseg, path1); rm(path1)
+path1 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/',
+               'Out_Grid_Cluster_Seg',Sys.Date(),'_',nsim,'x.RDS')
+#saveRDS(results_clus_seg, path1); rm(path1)
+####################################################################################################
+```
+
+```{r Comparison of metrics}
+####################################################################################################
+#Comparison 4-8-20
+results_mat_nonseg = readRDS('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/Out_Grid_Binary_Nonseg2020-04-07_1000x.RDS')
+results_mat_seg = readRDS('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/Out_Grid_Binary_Seg2020-04-07_1000x.RDS')
+
+#The first thing we need to do is collapse these into AVERAGES 
+
+results_mat_nonseg_avg = results_mat_nonseg %>% group_by(PMinor_Parm, Conc_Parm) %>% summarise(KNN_1 = mean(KNearest_Mean, na.rm = T),
+                                                                                               KNN_2 = mean(KNearest_Var, na.rm = T),
+                                                                                               KNN_3 = mean(KNearest_Skew, na.rm = T),
+                                                                                               KNN_4 = mean(KNearest_Kur, na.rm = T),
+                                                                                               Ratio = KNN_4 / KNN_1) %>% data.frame() 
+results_mat_seg_avg = results_mat_seg %>% group_by(PMinor_Parm, Conc_Parm) %>% summarise(KNN_1 = mean(KNearest_Mean, na.rm = T),
+                                                                                         KNN_2 = mean(KNearest_Var, na.rm = T),
+                                                                                         KNN_3 = mean(KNearest_Skew, na.rm = T),
+                                                                                         KNN_4 = mean(KNearest_Kur, na.rm = T),
+                                                                                         Ratio = KNN_4 / KNN_1) %>% data.frame()
+results_clus_nonseg_avg = results_clus_nonseg %>% group_by(PMinor_Parm, r_Parm) %>% summarise(KNN_1 = mean(KNearest_Mean, na.rm = T),
+                                                                                              KNN_2 = mean(KNearest_Var, na.rm = T),
+                                                                                              KNN_3 = mean(KNearest_Skew, na.rm = T),
+                                                                                              KNN_4 = mean(KNearest_Kur, na.rm = T),
+                                                                                              Ratio = KNN_4 / KNN_1) %>% data.frame() %>%
+  filter(r_Parm > 10) #drop for clarity
+results_clus_seg_avg = results_clus_seg %>% group_by(PMinor_Parm, r_Parm) %>% summarise(KNN_1 = mean(KNearest_Mean, na.rm = T),
+                                                                                        KNN_2 = mean(KNearest_Var, na.rm = T),
+                                                                                        KNN_3 = mean(KNearest_Skew, na.rm = T),
+                                                                                        KNN_4 = mean(KNearest_Kur, na.rm = T),
+                                                                                        Ratio = KNN_4 / KNN_1) %>% data.frame()%>%
+  filter(r_Parm > 10) #drop for clarity
+#check 
+#mean(results_mat_nonseg$KNearest_Mean[which(results_mat_nonseg$PMinor_Parm == 0.1 & results_mat_nonseg$Conc_Parm == 0.5)]) #matches
+
+
+#add variable for row
+results_clus_nonseg_avg$id = row.names(results_clus_nonseg_avg) %>% as.numeric(as.character())
+results_clus_seg_avg$id = row.names(results_clus_seg_avg) %>% as.numeric(as.character())
+results_mat_nonseg_avg$id = row.names(results_mat_nonseg_avg) %>% as.numeric(as.character())
+results_mat_seg_avg$id = row.names(results_mat_seg_avg) %>% as.numeric(as.character())
+
+```
+
+```{r Plot comparison}
+#We want a four-way comparison that allows us to compare among seg/nonseg, cluster/noncluster
+
+#KNN1: Mean
+#shape: segregation
+#color: DGP
+ggplot() + geom_point(data = results_clus_nonseg_avg, aes(x = id, y = KNN_1), fill = 'blue', shape = 21, size = 3) + 
+  geom_point(data = results_clus_seg_avg, aes(x = id, y = KNN_1), fill = 'blue', shape = 22, size = 3) + 
+  geom_point(data = results_mat_nonseg_avg, aes(x = id, y = KNN_1), fill = 'green', shape = 21, size = 3) + 
+  geom_point(data = results_mat_seg_avg, aes(x = id, y = KNN_1), fill = 'green', shape = 22, size = 3) + 
+  theme_minimal()
+#Expect to see Squares above Circles (Seg vs Nonseg). And we generally do! But it's clearly moderated by Pminor_Parm: KNN_1 drops with PMinor_Parm
+#Should I start distinguishing between KNN for the majority and minority group . . .?
+
+#KNN2: SD
+#shape: segregation
+#color: DGP
+ggplot() + geom_point(data = results_clus_nonseg_avg, aes(x = id, y = KNN_2), fill = 'blue', shape = 21, size = 3) + 
+  geom_point(data = results_clus_seg_avg, aes(x = id, y = KNN_2), fill = 'blue', shape = 22, size = 3) + 
+  geom_point(data = results_mat_nonseg_avg, aes(x = id, y = KNN_2), fill = 'green', shape = 21, size = 3) + 
+  geom_point(data = results_mat_seg_avg, aes(x = id, y = KNN_2), fill = 'green', shape = 22, size = 3) + 
+  theme_minimal()
+#Expect to see Green above Blue (Bin vs Clus). And we generally do! But it's clearly moderated by Pminor_Parm: KNN_2 (mostly...) drops with PMinor_Parm
+#Not very useful
+
+#KNN3: Skew
+#shape: segregation
+#color: DGP
+ggplot() + geom_point(data = results_clus_nonseg_avg, aes(x = id, y = KNN_3), fill = 'blue', shape = 21, size = 3) + 
+  geom_point(data = results_clus_seg_avg, aes(x = id, y = KNN_3), fill = 'blue', shape = 22, size = 3) + 
+  geom_point(data = results_mat_nonseg_avg, aes(x = id, y = KNN_3), fill = 'green', shape = 21, size = 3) + 
+  geom_point(data = results_mat_seg_avg, aes(x = id, y = KNN_3), fill = 'green', shape = 22, size = 3) + 
+  theme_minimal()
+#All over the place. What to do with this?
+#Kind of a mess. Usually they are different, but sometimes the same
+
+#This would be a lot clearer if we had the same number of values at each level of P_Minority.
+#Cluster has 7 values at each P_Minority; Binary has 6. Redo this . . . 
+
+#KNN4: Skew
+#shape: segregation
+#color: DGP
+ggplot() + geom_point(data = results_clus_nonseg_avg, aes(x = id, y = KNN_4), fill = 'blue', shape = 21, size = 3) + 
+  geom_point(data = results_clus_seg_avg, aes(x = id, y = KNN_4), fill = 'blue', shape = 22, size = 3) + 
+  geom_point(data = results_mat_nonseg_avg, aes(x = id, y = KNN_4), fill = 'green', shape = 21, size = 3) + 
+  geom_point(data = results_mat_seg_avg, aes(x = id, y = KNN_4), fill = 'green', shape = 22, size = 3) + 
+  theme_minimal()
+
+#We are seeing overlap for each of the moments, at each P_Minority value, depending on the secondary parameter.
+#It's obvious that we will need to normalize by the mean . . .
+
+ggplot() + geom_point(data = results_clus_nonseg_avg, aes(x = id, y = Ratio), fill = 'blue', shape = 21, size = 3) + 
+  geom_point(data = results_clus_seg_avg, aes(x = id, y = Ratio), fill = 'blue', shape = 22, size = 3) + 
+  geom_point(data = results_mat_nonseg_avg, aes(x = id, y = Ratio), fill = 'green', shape = 21, size = 3) + 
+  geom_point(data = results_mat_seg_avg, aes(x = id, y = Ratio), fill = 'green', shape = 22, size = 3) + 
+  theme_minimal()
+#Still just a mess
+
+```
+
+```{r Try to compare moments}
+#Note 24 aug '23, there is a problem with at least one of the plots below (throws fatal error). 
+##Just commented out all plots
+
+#Let's just look at one particular value of composition, with one DGP, look at all four moments
+
+test1 = results_clus_nonseg_avg[which(results_clus_nonseg_avg$PMinor_Parm >= 0.3 & results_clus_nonseg_avg$PMinor_Parm < 0.4),]
+
+colors <- c("Mean" = "blue", "SD" = "red", "Skew" = 'green', 'Kurt.' = 'purple')
+# ggplot(data = test1) + 
+#   geom_line(aes(x = r_Parm, y = KNN_1, color = 'Mean')) +
+#   geom_line(aes(x = r_Parm, y = KNN_2, color = 'SD')) +
+#   geom_line(aes(x = r_Parm, y = 5 + KNN_3, color = 'Skew')) +
+#   geom_line(aes(x = r_Parm, y = 5 + KNN_4, color = 'Kurt.')) +
+#   labs(x = '1/Concentration',
+#        y = 'Moment') +
+#   scale_color_manual(values = colors)
+
+#For cluster_nonseg: SD increases with concentration [weird because . . . it's nonsegregated!] Others don't change with concentration
+
+test1 = results_clus_seg_avg[which(results_clus_nonseg_avg$PMinor_Parm >= 0.3 & results_clus_nonseg_avg$PMinor_Parm < 0.4),]
+
+colors <- c("Mean" = "blue", "SD" = "red", "Skew" = 'green', 'Kurt.' = 'purple')
+# ggplot(data = test1) + 
+#   geom_line(aes(x = r_Parm, y = KNN_1, color = 'Mean')) +
+#   geom_line(aes(x = r_Parm, y = KNN_2, color = 'SD')) +
+#   geom_line(aes(x = r_Parm, y = 5 + KNN_3, color = 'Skew')) +
+#   geom_line(aes(x = r_Parm, y = 5 + KNN_4, color = 'Kurt.')) +
+#   labs(x = '1/Concentration',
+#        y = 'Moment') +
+#   scale_color_manual(values = colors)
+
+#For cluster_seg: Mean increases with concentration: makes sense
+#SD increases with concentration
+#Skew decreases with concentration
+#Kurt REALLY increases with concentration
+
+################################
+
+################################
+
+#Let's look at MEAN, for all concentrations, all DGP's
+
+#one composition
+conc3_clus_nonseg  = results_clus_nonseg_avg[which(results_clus_nonseg_avg$PMinor_Parm >= 0.3 & results_clus_nonseg_avg$PMinor_Parm < 0.4),]
+conc3_clus_seg  = results_clus_seg_avg[which(results_clus_seg_avg$PMinor_Parm >= 0.3 & results_clus_seg_avg$PMinor_Parm < 0.4),]
+conc3_bin_nonseg  = results_mat_nonseg_avg[which(results_mat_nonseg_avg$PMinor_Parm >= 0.3 & results_mat_nonseg_avg$PMinor_Parm < 0.4),]
+conc3_bin_seg  = results_mat_seg_avg[which(results_mat_seg_avg$PMinor_Parm >= 0.3 & results_mat_seg_avg$PMinor_Parm < 0.4),]
+
+colors <- c("Clus. Nonseg." = "blue", "Clus. Seg." = "red", "Bin. Nonseg." = 'green', 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_nonseg, aes(x = id, y = KNN_1, color = "Clus. Nonseg.")) +
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_1, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_nonseg, aes(x = id, y = KNN_1, color = "Bin. Nonseg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_1, color = "Bin. Seg."))
+
+#OK, here's something. For nonseg, mean_knn is lower than majority proportion (1 - P-min). But for seg, that's not so.
+##Need to verify that this is the case for the other concentrations
+
+# composition = 0.1
+#Same pattern, but different cutoff
+conc3_clus_nonseg  = results_clus_nonseg_avg[which(results_clus_nonseg_avg$PMinor_Parm >= 0.1 & results_clus_nonseg_avg$PMinor_Parm < 0.2),]
+conc3_clus_seg  = results_clus_seg_avg[which(results_clus_seg_avg$PMinor_Parm >= 0.1 & results_clus_seg_avg$PMinor_Parm < 0.2),]
+conc3_bin_nonseg  = results_mat_nonseg_avg[which(results_mat_nonseg_avg$PMinor_Parm >= 0.1 & results_mat_nonseg_avg$PMinor_Parm < 0.2),]
+conc3_bin_seg  = results_mat_seg_avg[which(results_mat_seg_avg$PMinor_Parm >= 0.1 & results_mat_seg_avg$PMinor_Parm < 0.2),]
+
+colors <- c("Clus. Nonseg." = "blue", "Clus. Seg." = "red", "Bin. Nonseg." = 'green', 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_nonseg, aes(x = id, y = KNN_1, color = "Clus. Nonseg.")) +
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_1, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_nonseg, aes(x = id, y = KNN_1, color = "Bin. Nonseg.")) +
+#   geom_point
+
+# composition = 0.4
+#Same pattern, but different cutoff
+conc3_clus_nonseg  = results_clus_nonseg_avg[which(results_clus_nonseg_avg$PMinor_Parm >= 0.4 & results_clus_nonseg_avg$PMinor_Parm < 0.5),]
+conc3_clus_seg  = results_clus_seg_avg[which(results_clus_seg_avg$PMinor_Parm >= 0.4 & results_clus_seg_avg$PMinor_Parm < 0.5),]
+conc3_bin_nonseg  = results_mat_nonseg_avg[which(results_mat_nonseg_avg$PMinor_Parm >= 0.4 & results_mat_nonseg_avg$PMinor_Parm < 0.5),]
+conc3_bin_seg  = results_mat_seg_avg[which(results_mat_seg_avg$PMinor_Parm >= 0.4 & results_mat_seg_avg$PMinor_Parm < 0.5),]
+
+colors <- c("Clus. Nonseg." = "blue", "Clus. Seg." = "red", "Bin. Nonseg." = 'green', 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_nonseg, aes(x = id, y = KNN_1, color = "Clus. Nonseg.")) +
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_1, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_nonseg, aes(x = id, y = KNN_1, color = "Bin. Nonseg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_1, color = "Bin. Seg."))
+# ################################
+
+################################
+#OK, safe to assume we can distinguish seg from nonseg
+#Now let's see if we can distinguish seg_bin from seg_cluster, at a given concentration
+
+conc3_clus_seg  = results_clus_seg_avg[which(results_clus_seg_avg$PMinor_Parm >= 0.3 & results_clus_seg_avg$PMinor_Parm < 0.4),]
+conc3_bin_seg  = results_mat_seg_avg[which(results_mat_seg_avg$PMinor_Parm >= 0.3 & results_mat_seg_avg$PMinor_Parm < 0.4),]
+
+colors <- c("Clus. Seg." = "red", 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_1, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_1, color = "Bin. Seg."))
+# #KNN 1 same crosses
+
+colors <- c("Clus. Seg." = "red", 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_2, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_2, color = "Bin. Seg."))
+# #KNN 2 mostly (but not absolutely) lower for cluster. They cross when binary conc is high, and cluster conc is low
+
+colors <- c("Clus. Seg." = "red", 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_3, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_3, color = "Bin. Seg."))
+# #Again they cross. Both decrease with concentration
+# 
+# colors <- c("Clus. Seg." = "red", 'Bin. Seg.' = 'purple')
+# ggplot() + 
+#   geom_point(data = conc3_clus_seg, aes(x = id, y = KNN_4, color = "Clus. Seg.")) +
+#   geom_point(data = conc3_bin_seg, aes(x = id, y = KNN_4, color = "Bin. Seg."))
+#DAMN IT they cross. Both increase with concentration
+
+#We cannot distinguish using the moments! Damn
+```

@@ -1,18 +1,7 @@
----
-title: "Segregation Classification"
-output:
-  html_document:
-    code_folding: hide
----
-
-```{r setup, include=FALSE}
-#25 aug '23 based on 9-10-19; for github
 #9-10-19 based on 5-24-19_accuracyplots and 5-22-19_sim
 #Point is just to make and plot a binary and a clustered neighborhoods, using colors
 
-knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(warning = FALSE, message = FALSE)  #quick and dirty way to suppress warnings
-#Preamble from 9-10-19 website plots
+#Preamble
 library(ggplot2)
 library(tidyr)
 library(plyr);library(dplyr, warn.conflicts = F)
@@ -21,19 +10,6 @@ library(stargazer)
 rm(list=ls())
 s = function(x){summary(factor(x))}
 ####################################################################################################
-```
-
-## Segregation Classification
-
-For more my homepage see <http://jeremyspater.com>.
-
-We would like a method for classifying neighborhoods as **segregated** or not. This is a problem with many real-world applications in social science.
-
-We will do this by generating simulated neighborhoods and using them to test classifiers.
-
-First we set some global parameters: the size of the neighborhood (arbitrary units, could be meters) and the number of grid spaces.
-
-```{r Global parameters}
 
 ####################################################################################################
 #Set global parameters
@@ -41,21 +17,8 @@ xlim = 100 #neighborhood size x. call this meters. or km if this is city scale??
 ylim = 100 #neighborhood size y. call this meters. or km if this is city scale??
 ngrid = 10 #number of grid spaces
 ####################################################################################################
-```
 
-## Functions to create simulated neighborhoods
 
-We will use two data-generating processes (DGP's): binary and cluster. These can both be used to create segregated or integrated (non-segregated) neighborhoods. 
-
-Neighborhoods generated using the binary DGP are split at a particular line of longitude (i.e. left vs right), without loss of generality. In segregated neighborhoods, individuals from the minority group are more likely to be found to the west (left) of the line. 
-
-In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
-
-### Cluster DGP
-
-The cluster DGP generates circular clusters of individuals within the neighborhood. For segregated neighborhoods, each cluster consists predominantly of individuals from one group, while for integrated neighborhoods, clusters are not segregated by group.
-
-```{r Clustered DGP}
 ####################################################################################################
 #Clustered process
 
@@ -111,9 +74,7 @@ ClusterNonSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
   ns = min(nrow(kids_df), n_samp)
   return(kids_df[sample(nrow(kids_df), ns), ]) #return sample of n rows
 }
-```
-This code creates a cluster-segregated neighborhood and makes a plot.
-```{r Make and plot (clustered)}
+
 #make one and plot
 d = ClusterSeg(ka = 0.01, nclus = 100, r = 10, p = 0.4, n_samp = 1E6) %>% rename(Ethnicity = minor) %>%
   mutate(Ethnicity = mapvalues(Ethnicity, from = c('yes', 'no'), to = c('Minority','Majority')))
@@ -136,13 +97,8 @@ ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 
 path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
 dir.create(path0)
 #ggsave(filename = paste0(path0, 'cluster_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
-```
 
-### Binary DGP
 
-This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
-
-```{r Binary DGP}
 ####################################################################################################
 #Binary segregation
 
@@ -177,9 +133,7 @@ create_Seg = function(n, xlim, ylim, pminority, conc){ #concentration parameter
   fr$lat[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T), 0, ylim) #y: runif from 0 to ylim
   return(fr)
 }
-```
-This code creates a binary-segregated neighborhood and makes a plot.
-```{r Make and plot binary neighborhood}
+
 #make one and plot
 d = create_Seg(n = 10000, xlim = 100, ylim = 100, pminority = 0.3, conc = 0.8) %>% rename(Ethnicity = minor) %>%
   mutate(Ethnicity = mapvalues(Ethnicity, from = c('TRUE', 'FALSE'), to = c('Minority','Majority')))
@@ -199,4 +153,3 @@ ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 
 path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
 dir.create(path0)
 #ggsave(filename = paste0(path0, 'binary_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
-```
