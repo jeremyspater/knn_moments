@@ -25,8 +25,6 @@ s = function(x){summary(factor(x))}
 
 ## Segregation Classification
 
-For more my homepage see <http://jeremyspater.com>.
-
 We would like a method for classifying neighborhoods as **segregated** or not. This is a problem with many real-world applications in social science.
 
 We will do this by generating simulated neighborhoods and using them to test classifiers.
@@ -141,6 +139,8 @@ dir.create(path0)
 ### Binary DGP
 
 This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
+
+Here is a Shiny app that demonstrates this method and its parameters: <https://jeremyspater.shinyapps.io/app-2/>.
 
 ```{r Binary DGP}
 ####################################################################################################
