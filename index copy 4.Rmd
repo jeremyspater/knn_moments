@@ -23,7 +23,7 @@ s = function(x){summary(factor(x))}
 ####################################################################################################
 ```
 
-## Relevant social science problem
+## Segregation Classification
 
 We would like a method for classifying neighborhoods as **segregated** or not. This is a problem with many real-world applications in social science.
 
@@ -41,80 +41,15 @@ ngrid = 10 #number of grid spaces
 ####################################################################################################
 ```
 
-## Two functions to create simulated neighborhoods
+## Functions to create simulated neighborhoods
 
 We will use two data-generating processes (DGP's): binary and cluster. These can both be used to create segregated or integrated (non-segregated) neighborhoods. 
 
 Neighborhoods generated using the binary DGP are split at a particular line of longitude (i.e. left vs right), without loss of generality. In segregated neighborhoods, individuals from the minority group are more likely to be found to the west (left) of the line. 
 
-### Binary DGP
-
-This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
-
-**Here is a Shiny app that demonstrates this method and its parameters:** <https://jeremyspater.shinyapps.io/app-2/>.
-
-```{r Binary DGP}
-####################################################################################################
-#Binary segregation
-
-#Nonsegregated neighborhoods: just a uniform distribution
-create_Nonseg = function(n, xlim, ylim, pminority){
-  fr = data.frame(long = runif(n,0,xlim),
-                  lat = runif(n,0,xlim),
-                  minor = rbinom(n,1,pminority) == 1)
-  return(fr)
-}
-
-#Seg neighborhoods: Assume that majority is uniform across whole space
-
-create_Seg = function(n, xlim, ylim, pminority, conc){ #concentration parameter
-  fr = data.frame(minor = rbinom(n,1,pminority) == 1,
-                  long = NA,
-                  lat = NA,
-                  ghe = rbinom(n,1,conc)) #"ghetto" parameter: proportion of each group on the "correct" side
-  #lat longs for majority (not concentrated), ie ghe = F
-  fr$long[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0, xlim) #x: runif from 0 to xlim
-  fr$lat[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0, ylim) #y: runif from 0 to ylim
-  #lat longs for majority (concentrated)
-  fr$long[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), min = 0, #x: runif from 0 to ghetto limit
-                                               max = (1 - pminority)*xlim) #ghetto limit: proportional to size of majority
-  fr$lat[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), 0, ylim) #y: runif from 0 to xlim
-  #lat longs for minority (not concentrated)
-  fr$long[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0, xlim) #x: runif from 0 to xlim
-  fr$lat[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0, ylim) #y: runif from 0 to ylim
-  #lat longs for minority (concentrated)
-  fr$long[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T),  #x: runif from ghetto edge to xlim
-                                               min = (1-pminority)*xlim, max = xlim) #ghetto limit: prop. to size of minority
-  fr$lat[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T), 0, ylim) #y: runif from 0 to ylim
-  return(fr)
-}
-```
-This code creates a binary-segregated neighborhood and makes a plot.
-```{r Make and plot binary neighborhood}
-#make one and plot
-d = create_Seg(n = 10000, xlim = 100, ylim = 100, pminority = 0.3, conc = 0.8) %>% rename(Ethnicity = minor) %>%
-  mutate(Ethnicity = mapvalues(Ethnicity, from = c('TRUE', 'FALSE'), to = c('Minority','Majority')))
-
-ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 2) + theme_bw() +
-  ggtitle('Binary segregation example') + theme(text = element_text(size=24), plot.title = element_text(hjust = 0.5)) +
-  scale_shape_manual(values = c(1, 2)) +
-  theme(axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
-        axis.ticks.x=element_blank(),
-        axis.title.y=element_blank(),
-        axis.text.y=element_blank(),
-        axis.ticks.y=element_blank(), 
-        panel.background = element_rect(fill = "grey")) +
-  scale_color_manual(values=c("darkmagenta", "green4")) +
-  xlim(0,100) + ylim(0,100)
-path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
-dir.create(path0)
-#ggsave(filename = paste0(path0, 'binary_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
-```
+In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
 
 ### Cluster DGP
-
-In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
 
 The cluster DGP generates circular clusters of individuals within the neighborhood. For segregated neighborhoods, each cluster consists predominantly of individuals from one group, while for integrated neighborhoods, clusters are not segregated by group.
 
@@ -199,4 +134,69 @@ ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 
 path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
 dir.create(path0)
 #ggsave(filename = paste0(path0, 'cluster_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
+```
+
+### Binary DGP
+
+This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the western part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
+
+Here is a Shiny app that demonstrates this method and its parameters: <https://jeremyspater.shinyapps.io/app-2/>.
+
+```{r Binary DGP}
+####################################################################################################
+#Binary segregation
+
+#Nonsegregated neighborhoods: just a uniform distribution
+create_Nonseg = function(n, xlim, ylim, pminority){
+  fr = data.frame(long = runif(n,0,xlim),
+                  lat = runif(n,0,xlim),
+                  minor = rbinom(n,1,pminority) == 1)
+  return(fr)
+}
+
+#Seg neighborhoods: Assume that majority is uniform across whole space
+
+create_Seg = function(n, xlim, ylim, pminority, conc){ #concentration parameter
+  fr = data.frame(minor = rbinom(n,1,pminority) == 1,
+                  long = NA,
+                  lat = NA,
+                  ghe = rbinom(n,1,conc)) #"ghetto" parameter: proportion of each group on the "correct" side
+  #lat longs for majority (not concentrated), ie ghe = F
+  fr$long[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == F & fr$ghe == F] = runif(sum(fr$minor == F & fr$ghe == F), 0, ylim) #y: runif from 0 to ylim
+  #lat longs for majority (concentrated)
+  fr$long[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), min = 0, #x: runif from 0 to ghetto limit
+                                               max = (1 - pminority)*xlim) #ghetto limit: proportional to size of majority
+  fr$lat[fr$minor == F & fr$ghe == T] = runif(sum(fr$minor == F & fr$ghe == T), 0, ylim) #y: runif from 0 to xlim
+  #lat longs for minority (not concentrated)
+  fr$long[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0, xlim) #x: runif from 0 to xlim
+  fr$lat[fr$minor == T & fr$ghe == F] = runif(sum(fr$minor == T & fr$ghe == F), 0, ylim) #y: runif from 0 to ylim
+  #lat longs for minority (concentrated)
+  fr$long[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T),  #x: runif from ghetto edge to xlim
+                                               min = (1-pminority)*xlim, max = xlim) #ghetto limit: prop. to size of minority
+  fr$lat[fr$minor == T & fr$ghe == T] = runif(sum(fr$minor == T & fr$ghe == T), 0, ylim) #y: runif from 0 to ylim
+  return(fr)
+}
+```
+This code creates a binary-segregated neighborhood and makes a plot.
+```{r Make and plot binary neighborhood}
+#make one and plot
+d = create_Seg(n = 10000, xlim = 100, ylim = 100, pminority = 0.3, conc = 0.8) %>% rename(Ethnicity = minor) %>%
+  mutate(Ethnicity = mapvalues(Ethnicity, from = c('TRUE', 'FALSE'), to = c('Minority','Majority')))
+
+ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 2) + theme_bw() +
+  ggtitle('Binary segregation example') + theme(text = element_text(size=24), plot.title = element_text(hjust = 0.5)) +
+  scale_shape_manual(values = c(1, 2)) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(), 
+        panel.background = element_rect(fill = "grey")) +
+  scale_color_manual(values=c("darkmagenta", "green4")) +
+  xlim(0,100) + ylim(0,100)
+path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
+dir.create(path0)
+#ggsave(filename = paste0(path0, 'binary_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
 ```
