@@ -76,7 +76,8 @@ ClusterNonSeg = function(n_samp = 100, p = 0.3, nclus = 13, ka = 0.05, r = 3){
 }
 
 #make one and plot
-d = ClusterSeg(ka = 0.01, nclus = 100, r = 10, p = 0.4, n_samp = 1E6) %>% rename(Ethnicity = minor) %>%
+d = ClusterSeg(ka = 0.01, nclus = 100, r = 10, p = input$pminority, n_samp = 1E6) %>% 
+  rename(Ethnicity = minor) %>%
   mutate(Ethnicity = mapvalues(Ethnicity, from = c('yes', 'no'), to = c('Minority','Majority')))
 
 #ggplot(data = d) + geom_point(aes(x = long, y = lat, shape = Ethnicity), size = 2) + theme_bw() +

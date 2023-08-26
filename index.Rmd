@@ -51,7 +51,7 @@ Neighborhoods generated using the binary DGP are split at a particular line of l
 
 This is a function to create a segregated neighborhood using the binary DGP. Individuals from the minority group are concentrated in the eastern part of the neighborhood. The concentration parameter <code>conc</code> determines <i>how segregated</i> the neighborhood is, i.e. the probability that a particular individual will live on the side of the neighborhood that "belongs" to their group. 
 
-**Here is a Shiny app that demonstrates this method and its parameters:** <https://jeremyspater.shinyapps.io/app-2/>.
+**Here is a Shiny app that demonstrates the binary DGP and its parameters:** <https://jeremyspater.shinyapps.io/app-2/>.
 
 ```{r Binary DGP}
 ####################################################################################################
@@ -117,6 +117,8 @@ dir.create(path0)
 In neighborhoods generated using the cluster DGP, individuals are located in circular clusters that are situated randomly throughout the neighborhood. In segregated cluster neighborhoods, each cluster is predominantly made up of individuals from one group or the other (majority or minority). 
 
 The cluster DGP generates circular clusters of individuals within the neighborhood. For segregated neighborhoods, each cluster consists predominantly of individuals from one group, while for integrated neighborhoods, clusters are not segregated by group.
+
+**Here is a Shiny app that demonstrates the binary DGP and its parameters:** <https://jeremyspater.shinyapps.io/app-cluster/>.
 
 ```{r Clustered DGP}
 ####################################################################################################
