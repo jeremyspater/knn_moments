@@ -19,6 +19,7 @@ library(tidyr)
 library(plyr);library(dplyr, warn.conflicts = F)
 library(tictoc)
 library(stargazer)
+library(e1071) #gives skewness, kurtosis
 rm(list=ls())
 s = function(x){summary(factor(x))}
 ####################################################################################################
@@ -202,4 +203,125 @@ ggplot(data = d) + geom_point(aes(x = long, y = lat, color = Ethnicity), size = 
 path0 = paste0('/Users/jeremyspater/Dropbox/duke/political economy core/prospectus/methods paper/results_output/',Sys.Date(),'/')
 dir.create(path0)
 #ggsave(filename = paste0(path0, 'cluster_seg_example_website.png'), height = 200, width = 200, units = 'mm'); rm(path0)
+```
+
+
+## Segregation Classification
+
+We would like to classify neighborhoods as segregated or nonsegregated. To do this, we will first calculate the k-nearest-neighbors (KNN), defined here for a household, as the number of the closest households that are the same ethnicity as the household in question. For example, if k = 5, and 4 of the 5 households that are closest to us are of the same ethnicity as us, then our KNN is 4.
+
+We will use the first four moments of the KNN distribution (mean, standard deviation, skew, and kurtosis) to predict whether our simulated neighborhoods came from segregated or nonsegregated neighborhoods.
+
+First, we define functions to create simulated neighborhoods (segregated and nonsegregated) and calculate their KNN. We will do this for 2000 neighborhoods (half segregated, half nonsegregated or integrated), and output the time elapsed (the code is rather slow as written; it could be vectorized for better performance).
+
+```{r Create data (Binary)}
+
+#code from 4-7-20 Moments copy
+
+####################################################################################################
+#Functions to calculate segregation
+
+#May 2019 code to define K-nearest
+source("https://raw.githubusercontent.com/jeremyspater/knn_moments/main/5-10-19_sim_knearest_gh.R")
+# ####################################################################################################
+
+#Functions to calculate k-nearest mean, median, and sd for large number of simulations (BINARY)
+set.seed(1234)
+#For nonsegregated neighborhoods
+K_Nonseg_M = function(NeighSize, pminority = 0.3, k_in = 10){ #new version 4-1-20; higher moments
+  A = create_Nonseg(n = NeighSize,
+                    xlim = xlim,
+                    ylim = ylim,
+                    pminority = pminority)
+  A_prime = k_sim(A, k = k_in)
+  #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+  out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  return(out)
+}
+
+#For segregated neighborhoods
+K_Seg_M = function(NeighSize, pminority = 0.3, k_in = 10,  conc = 0.7){
+  A = create_Seg(n = NeighSize,
+                 xlim = xlim,
+                 ylim = ylim,
+                 pminority = pminority,
+                 conc = conc)
+  A_prime = k_sim(A, k = k_in)
+  #out = c( mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ) )
+  out = data.frame(KNearest_Mean = mean( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_SD = sd( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Var = var( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Skew = skewness( A_prime[, paste0('Nearest_', k_in, '_Same') ] ),
+                   KNearest_Kur = kurtosis( A_prime[, paste0('Nearest_', k_in, '_Same') ] ))
+  return(out)
+}
+
+#Obtain KNN statistics for parameter grid, seg and nonseg (BINARY)
+#pminority_vec =  seq(0.1, 0.5, 0.1) #proportion of minorities
+#conc_vec = seq(0.5, 1, 0.1) #concentration
+pminority_vec = c(0.25) #just one value
+conc_vec = c(0.75) #just one value
+
+parm_exp = expand.grid(pminority_vec, conc_vec) %>% 
+  rename(p_minority = Var1,
+         conc = Var2) ; rm(pminority_vec, conc_vec) #
+
+#Run on grid
+nsim = 1000#1000 #
+n_neigh = 100#100 #people per neighborhood
+n_tot = nrow(parm_exp) * nsim #number of rows in results matrix: grid points * sims/point
+results_mat_nonseg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+results_mat_seg = data.frame(matrix(NA, nrow = n_tot, ncol = 8))
+names(results_mat_nonseg) = c('NeighType','PMinor_Parm','Conc_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+names(results_mat_seg) = c('NeighType','PMinor_Parm','Conc_Parm','KNearest_Mean', 'KNearest_SD', 'KNearest_Var', 'KNearest_Skew', 'KNearest_Kur')
+tic()
+for(j in 1:nrow(parm_exp)){
+  #print(j)
+  #K-nearest
+  Out_K_Nonseg = ldply(1:nsim, function(x) K_Nonseg_M(NeighSize = n_neigh,
+                                                    pminority = parm_exp$p_minority[j],
+                                                    k_in = 10 ))
+  Out_K_Seg = ldply(1:nsim, function(x) K_Seg_M(NeighSize = n_neigh,
+                                              pminority = parm_exp$p_minority[j],
+                                              k_in = 10,
+                                              conc = parm_exp$conc[j] ))
+  c1 = (j-1)*nsim + 1
+  c2 = (j)*nsim
+  results_mat_nonseg[c1:c2,1] = 'Nonseg. Binary'; results_mat_nonseg[c1:c2,2] = parm_exp[j,1]; results_mat_nonseg[c1:c2,3] = parm_exp[j,2]
+  results_mat_nonseg[c1:c2,4:8] =  Out_K_Nonseg    #Nonseg Results
+  results_mat_seg[c1:c2,1] = 'Seg. Binary'; results_mat_seg[c1:c2,2] = parm_exp[j,1]; results_mat_seg[c1:c2,3] = parm_exp[j,2]
+  results_mat_seg[c1:c2,4:8] = Out_K_Seg    #Seg results
+}
+toc() #8 sec for 10 simulations with 30 rows of parm_exp. 700 sec for 1000 simulations
+#8 sec for 1000 simulations with 1 row of parm_exp
+
+```
+
+Now we will use the moments of the KNN metric to classify whether neighborhoods are segregated or integrated. In the step above, we created 2000 neighborhoods (half segregated, half integrated). We will used the first 1900 rows for supervised Naive Bayes classification, and the remaining 100 neighborhoods as a test set. 
+
+The number that the script prints at the end is the number out of 100 neighborhoods in the test set that were classified correctly. In testing, this was about 95%: Not bad!
+
+```{r Naive Bayes classifier (for Binary)}
+
+results_mat_seg$Outcome = 1 #set outcome variable to 1 for segregated neighborhoods
+results_mat_nonseg$Outcome = 0 #set outcome variable to 0 for non-segregated neighborhoods
+
+data = rbind(results_mat_seg, results_mat_nonseg) #put seg, nonseg results together. 2k rows
+data$Outcome = as.factor(data$Outcome)
+
+#Naive Bayes
+
+#model <- naiveBayes(Outcome ~ KNearest_Mean, data = data)
+#pred = predict(model, newdata = data) #predictions for full data set
+
+#try this again on test, training data
+model <- naiveBayes(Outcome ~ KNearest_Mean, data = data[1:(nrow(data)-101),]) #save last 100 for test
+pred = predict(model, newdata = data[(nrow(data)-100):nrow(data),]) #test on last 100
+sum(pred == data$Outcome[(nrow(data)-100):nrow(data)]) #95%! Not half bad
+
+
 ```
