@@ -6,7 +6,6 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-#27 sep 23: based on 25 aug '23; change the comments; add classification algorithm
 #25 aug '23 based on 9-10-19; for github
 #9-10-19 based on 5-24-19_accuracyplots and 5-22-19_sim
 #Point is just to make and plot a binary and a clustered neighborhoods, using colors
@@ -36,8 +35,8 @@ First we set some global parameters: the size of the neighborhood (arbitrary uni
 
 ####################################################################################################
 #Set global parameters
-xlim = 100 #neighborhood size x; units can be considered meters (neighborhood scale)
-ylim = 100 #neighborhood size y; units can be considered meters (neighborhood scale)
+xlim = 100 #neighborhood size x. call this meters. or km if this is city scale??
+ylim = 100 #neighborhood size y. call this meters. or km if this is city scale??
 ngrid = 10 #number of grid spaces
 ####################################################################################################
 ```
